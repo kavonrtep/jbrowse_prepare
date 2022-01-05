@@ -1,0 +1,18 @@
+label	format	category	type	dirname	filename	color
+CEPIT	fasta	reference	reference	/mnt/raid/454_data/cuscuta/Cepithymum_assembly_v4/0_final_hifiasm+longstitch/	asm.bp.hap1+2.ctg.scaffolds.short_names.fa	
+maker_3rd_iteration	gff3	gene_annotation	CanvasFeatures	/mnt/raid/454_data/cuscuta/Cepithymum_assembly_v4/0_final_hifiasm+longstitch/maker_results3	maker_gene_annotation.gff3	
+maker_2rd_iteration	gff3	gene_annotation	CanvasFeatures	/mnt/raid/454_data/cuscuta/Cepithymum_assembly_v4/0_final_hifiasm+longstitch/maker_results2	maker_gene_annotation.gff3	
+maker_1st_iteration	gff3	gene_annotation	CanvasFeatures	/mnt/raid/454_data/cuscuta/Cepithymum_assembly_v4/0_final_hifiasm+longstitch/maker_results1	maker_gene_annotation.gff3	
+Coleus-F1	bam	expression	Alignments2	/mnt/raid/454_data/cuscuta/RNA_seq/RNA_seq_mapping/Cepithymum_asm_v4_mapping	CEPIT-Coleus-F1Aligned.sortedByCoord.out.bam	
+Betonica-F2	bam	expression	Alignments2	/mnt/raid/454_data/cuscuta/RNA_seq/RNA_seq_mapping/Cepithymum_asm_v4_mapping	CEPIT-Betonica-F2Aligned.sortedByCoord.out.bam	
+Betonica-F3	bam	expression	Alignments2	/mnt/raid/454_data/cuscuta/RNA_seq/RNA_seq_mapping/Cepithymum_asm_v4_mapping	CEPIT-Betonica-F3Aligned.sortedByCoord.out.bam	
+Coleus-I1	bam	expression	Alignments2	/mnt/raid/454_data/cuscuta/RNA_seq/RNA_seq_mapping/Cepithymum_asm_v4_mapping	CEPIT-Coleus-I1Aligned.sortedByCoord.out.bam	
+Coleus-I2	bam	expression	Alignments2	/mnt/raid/454_data/cuscuta/RNA_seq/RNA_seq_mapping/Cepithymum_asm_v4_mapping	CEPIT-Coleus-I2Aligned.sortedByCoord.out.bam	
+Coleus-I3	bam	expression	Alignments2	/mnt/raid/454_data/cuscuta/RNA_seq/RNA_seq_mapping/Cepithymum_asm_v4_mapping	CEPIT-Coleus-I3Aligned.sortedByCoord.out.bam	
+Coleus-T1	bam	expression	Alignments2	/mnt/raid/454_data/cuscuta/RNA_seq/RNA_seq_mapping/Cepithymum_asm_v4_mapping	CEPIT-Coleus-T1Aligned.sortedByCoord.out.bam	
+Coleus-T2	bam	expression	Alignments2	/mnt/raid/454_data/cuscuta/RNA_seq/RNA_seq_mapping/Cepithymum_asm_v4_mapping	CEPIT-Coleus-T2Aligned.sortedByCoord.out.bam	
+Coleus-T3	bam	expression	Alignments2	/mnt/raid/454_data/cuscuta/RNA_seq/RNA_seq_mapping/Cepithymum_asm_v4_mapping	CEPIT-Coleus-T3Aligned.sortedByCoord.out.bam	
+GMAP_TRINITY	gff3	gene_annotation	CanvasFeatures	/mnt/raid/454_data/cuscuta/Cepithymum_assembly_v4/0_final_hifiasm+longstitch/gff_for_annotation	GMAP_Trinity_CEPI_short_names.gff3	
+GTH_uniprot	gff3	gene_annotation	CanvasFeatures	/mnt/raid/454_data/cuscuta/Cepithymum_assembly_v4/0_final_hifiasm+longstitch/gff_for_annotation	GTH_on_uniprot_merged_short_names.gff	
+trinity_est	gff3	maker_alignments	CanvasFeatures	/mnt/raid/454_data/cuscuta/Cepithymum_assembly_v4/0_final_hifiasm+longstitch/maker_results1/asm.bp.hap1+2.ctg.scaffolds.short_names.all.parts	est2genome.gff	
+uniprot_solanales	gff3	maker_alignments	CanvasFeatures	/mnt/raid/454_data/cuscuta/Cepithymum_assembly_v4/0_final_hifiasm+longstitch/maker_results1/asm.bp.hap1+2.ctg.scaffolds.short_names.all.parts	protein2genome.gff	
