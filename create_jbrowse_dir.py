@@ -46,6 +46,9 @@ def read_config(config_file, directory):
 def makesymlink(src, dest):
     """ creates or update symlinks for file, if file exist it raises expetion
     """
+    print('adding link to ', src)
+    print('creating symlink to ', dest)
+    print(os.path.exists(dest))
     if os.path.exists(dest):
         if os.path.islink(dest):
             if os.readlink(dest) == src:
@@ -58,7 +61,17 @@ def makesymlink(src, dest):
             print(dest, " already exists and it is not link")
             sys.exit()
     else:
-        os.symlink(src, dest)
+        try:
+            os.symlink(src, dest)
+        except FileExistsError:
+            if os.path.islink(dest):
+                print(dest, " already exists")
+                print("replacing link to", os.readlink(dest), ' with ', src)
+                os.unlink(dest)
+                os.symlink(src, dest)
+            else:
+                print(dest, " already exists and it is not link")
+                sys.exit()
 
 
 def create_reference(fasta, directory):
@@ -95,11 +108,35 @@ def create_reference(fasta, directory):
         ["prepare-refseqs.pl", "--indexed_fasta", reference, "--out", directory]
         )
 
+def bed_to_tabix(record):
+    """sort, compress and create tabix index"""
+    bed = record['new_filename']
+    output_file = F"{bed}.sorted.bed.gz"
+    if os.path.exists(output_file):
+        print(output_file, "already exists, skipping..")
+    else:
+        makesymlink(record['src_filename'], bed)
+        os.system(F"sort -k1,1 -k 2,2n {bed} > {bed}.sorted.bed")
+        # remove lines wich started with "track name=" and "browser position"
+        os.system(F"grep -v '^track name=' {bed}.sorted.bed | grep -v '^browser position' > {bed}.sorted.bed.tmp")
+        os.system(F"mv {bed}.sorted.bed.tmp {bed}.sorted.bed")
+        os.system(F"bgzip -f {bed}.sorted.bed")
+        # make csi index
+        try:
+            subprocess.check_call(['tabix', '-p', 'bed', output_file])
+        except subprocess.CalledProcessError:
+            print("tabix tbi failed, trying with csi index")
+            subprocess.check_call(['tabix', '-C', '-p', 'bed', output_file])
+    return os.path.basename(output_file)
+
 
 def gff_to_tabix(record):
     """sort, compress and create tabix index"""
     gff = record['new_filename']
+    print("gff", gff)
     output_file = F"{gff}.sorted.gff.gz"
+    print("output_file", output_file)
+    print("------------------------")
     if os.path.exists(output_file):
         print(output_file, "already exists, skipping..")
     else:
@@ -107,9 +144,11 @@ def gff_to_tabix(record):
         os.system(F"sort -k1,1 -k 4,4n {gff} > {gff}.sorted.gff")
         os.system(F"bgzip -f {gff}.sorted.gff")
         # make csi index
-        os.system(F"tabix -C -p gff {output_file}")
-        # make tbi index
-        os.system(F"tabix -p gff {output_file}")
+        try:
+            subprocess.check_call(['tabix', '-p', 'gff', output_file])
+        except subprocess.CalledProcessError:
+            print("tabix tbi failed, trying with csi index")
+            subprocess.check_call(['tabix', '-C', '-p', 'gff', output_file])
     return os.path.basename(output_file)
 
 
@@ -126,7 +165,8 @@ def add_bam(record, f):
     conf_str = "\n".join(
         [F"[tracks.{record['label']}]", F"urlTemplate={bam}",
          "storeClass=JBrowse/Store/SeqFeature/BAM", F"type={record['type']}",
-         F"label={record['label']}", F"category={record['category']}", "\n"]
+         F"label={record['label']}", F"category={record['category']}",
+         F"style.color={record['color']}", "\n"]
         )
     f.write(conf_str)
 
@@ -134,15 +174,138 @@ def add_bam(record, f):
 def add_gff3(record, f):
     """ convert gff3 to tabix format and return gff3 track configuration"""
     gffformated = gff_to_tabix(record)
-    conf_str = "\n".join(
-        [F"[tracks.{record['label']}]", F"urlTemplate={gffformated}",
-         "storeClass=JBrowse/Store/SeqFeature/GFF3Tabix", F"type={record['type']}",
-         F"label={record['label']}", F"category={record['category']}", "\n"]
-        )
+    gffformated_full_path = os.path.join(args.output_dir, gffformated)
+    # check if tbi index is available
+    print("checking if tbi index is available")
+    print(gffformated + ".tbi")
+    if os.path.exists(gffformated_full_path + ".tbi"):
+        print("tbi index found")
+        conf_str = "\n".join(
+            [F"[tracks.{record['label']}]", F"urlTemplate={gffformated}",
+             "storeClass=JBrowse/Store/SeqFeature/GFF3Tabix", F"type={record['type']}",
+             F"label={record['label']}", F"category={record['category']}",
+             F"style.color={record['color']}",
+             F"histograms.color={record['color']},"
+             "\n"]
+
+            )
+    else:
+        print("csi index found")
+        conf_str = "\n".join(
+            [F"[tracks.{record['label']}]", F"urlTemplate={gffformated}",
+             F"csiUrlTemplate={gffformated}.csi",
+             "storeClass=JBrowse/Store/SeqFeature/GFF3Tabix", F"type={record['type']}",
+             F"label={record['label']}", F"category={record['category']}",
+             F"style.color={record['color']}",
+             F"histograms.color={record['color']}",
+             "\n"]
+            )
+    f.write(conf_str)
+
+def add_bed(record, f):
+    """ convert bed to tabix format and return bed track configuration"""
+    bedformated = bed_to_tabix(record)
+    # check if tbi index is available
+    if os.path.exists(bedformated + ".tbi"):
+        conf_str = "\n".join(
+            [F"[tracks.{record['label']}]", F"urlTemplate={bedformated}",
+             "storeClass=JBrowse/Store/SeqFeature/BEDTabix", F"type={record['type']}",
+             F"label={record['label']}", F"category={record['category']}",
+             F"style.color={record['color']}",
+             F"histograms.color={record['color']},"
+             "\n"]
+            )
+    else:
+        conf_str = "\n".join(
+            [F"[tracks.{record['label']}]", F"urlTemplate={bedformated}",
+             F"csiUrlTemplate={bedformated}.csi",
+             "storeClass=JBrowse/Store/SeqFeature/BEDTabix", F"type={record['type']}",
+             F"label={record['label']}", F"category={record['category']}",
+             F"style.color={record['color']}",
+             F"histograms.color={record['color']}",
+             "\n"]
+            )
     f.write(conf_str)
 
 
+
+def add_bed12(record, f):
+    """ first convert bed12 to gff3 and returs track configuration"""
+    record['new_src_filename'] = record['new_filename'] + ".gff3"
+
+
+    print("new_src_filename", record['new_src_filename'])
+    print("new_file", record['new_filename'])
+    bed12_to_gff3(record['src_filename'], record['new_src_filename'])
+    # remove leading directory name from new_filename
+    record['new_src_filename'] = os.path.basename(record['new_src_filename'])
+    record['src_filename'] = record['new_src_filename']
+    print('src_filename', record['src_filename'], "updated")
+    print("=====================================")
+    add_gff3(record, f)
+
+
+def bed12_to_gff3(bedfile, gff3out):
+    """convert bed12 to gff3"""
+    with open(bedfile) as f, open(gff3out, 'w') as gff3:
+        for line in f:
+            if line.startswith("#"):
+                continue
+            line = line.strip()
+            line = line.split("\t")
+            # check if bed12
+            if len(line) == 12:
+                chrom = line[0]
+                start = line[1]
+                end = line[2]
+                name = line[3]
+                score = line[4]
+                strand = line[5]
+                thickStart = line[6]
+                thickEnd = line[7]
+                itemRgb = line[8]
+                blockCount = line[9]
+                blockSizes = line[10]
+                blockStarts = line[11]
+                # get block sizes
+                blockSizes = blockSizes.split(",")
+                blockSizes = [int(x) for x in blockSizes if x != ""]
+                # get block starts
+                blockStarts = blockStarts.split(",")
+                blockStarts = [int(x) for x in blockStarts if x != ""]
+                # get exon number
+                exon_number = len(blockSizes)
+                # get exon start and end
+                exon_starts = []
+                exon_ends = []
+                for i in range(exon_number):
+                    exon_starts.append(int(start) + blockStarts[i])
+                    exon_ends.append(int(start) + blockStarts[i] + blockSizes[i])
+                # write gff3
+
+                for i in range(exon_number):
+                    gff3.write(F"{chrom}\tbed12\tbiological_region\t{exon_starts[i]}\t"
+                               F"{exon_ends[i]}\t{score}\t{strand}\t.\t"
+                               F"Parent={name}\n")
+                gff3.write(F"{chrom}\tbed12\tsequence_feature\t{start}\t{end}\t{score}\t"
+                           F"{strand}\t.\tID={name};Name={name}\n")
+            else:
+                print("line not bed12 format, skipping..")
+
+
 # def add_track(record, f):
+def add_bigwig(record, f):
+    """ takes bigwig file and return bigwig track configuration"""
+    print('adding bigwig file')
+    makesymlink(record['src_filename'], record['new_filename'])
+    bigwig = os.path.basename(record['new_filename'])
+    conf_str = "\n".join(
+        [F"[tracks.{record['label']}]", F"urlTemplate={bigwig}",
+         "storeClass=JBrowse/Store/SeqFeature/BigWig", F"type={record['type']}",
+         F"label={record['label']}", F"category={record['category']}",
+         F"style.pos_color={record['color']}", "\n"]
+        )
+    f.write(conf_str)
 
 
 if __name__ == "__main__":
@@ -162,7 +325,8 @@ if __name__ == "__main__":
     print('creating reference files:')
     create_reference(ref_path, args.output_dir)
 
-    add_track = {'gff3': add_gff3, 'bam': add_bam}
+    add_track = {'gff3': add_gff3, 'bam': add_bam, 'bigwig': add_bigwig,
+                 'bed': add_bed, 'bed12': add_bed12}
 
     # add tracks
     with open(os.path.join(args.output_dir, "tracks.conf"), 'w') as cfile:

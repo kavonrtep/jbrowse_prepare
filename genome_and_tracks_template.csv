@@ -16,3 +16,4 @@ GMAP_TRINITY	gff3	gene_annotation	CanvasFeatures	/mnt/raid/454_data/cuscuta/Cepi
 GTH_uniprot	gff3	gene_annotation	CanvasFeatures	/mnt/raid/454_data/cuscuta/Cepithymum_assembly_v4/0_final_hifiasm+longstitch/gff_for_annotation	GTH_on_uniprot_merged_short_names.gff	
 trinity_est	gff3	maker_alignments	CanvasFeatures	/mnt/raid/454_data/cuscuta/Cepithymum_assembly_v4/0_final_hifiasm+longstitch/maker_results1/asm.bp.hap1+2.ctg.scaffolds.short_names.all.parts	est2genome.gff	
 uniprot_solanales	gff3	maker_alignments	CanvasFeatures	/mnt/raid/454_data/cuscuta/Cepithymum_assembly_v4/0_final_hifiasm+longstitch/maker_results1/asm.bp.hap1+2.ctg.scaffolds.short_names.all.parts	protein2genome.gff	
+h
