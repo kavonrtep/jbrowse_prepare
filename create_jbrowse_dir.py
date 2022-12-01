@@ -124,6 +124,7 @@ def bed_to_tabix(record):
         # make csi index
         try:
             subprocess.check_call(['tabix', '-p', 'bed', output_file])
+            print('tabix index created')
         except subprocess.CalledProcessError:
             print("tabix tbi failed, trying with csi index")
             subprocess.check_call(['tabix', '-C', '-p', 'bed', output_file])
@@ -135,8 +136,17 @@ def gff_to_tabix(record):
     gff = record['new_filename']
     print("gff", gff)
     output_file = F"{gff}.sorted.gff.gz"
+    output_bigwig = F"{gff}.sorted.gff.gz.bw"
     print("output_file", output_file)
     print("------------------------")
+    # check is corresponding bigwig file exist - same name but with bw extension
+    print("checking if bigwig file exist")
+    print(record['src_filename']+".bw")
+    if os.path.exists(record['src_filename']+".bw"):
+        print('bigwig file exist, adding it to gff record')
+        # make symlink to bigwig file, owerride if exist
+        makesymlink(record['src_filename'] + '.bw', output_bigwig)
+
     if os.path.exists(output_file):
         print(output_file, "already exists, skipping..")
     else:
@@ -156,19 +166,46 @@ def add_bam(record, f):
     """ create bam index if does not exists and return bam track configuration"""
     print('adding bam file')
     makesymlink(record['src_filename'], record['new_filename'])
-    if not os.path.exists(record['src_filename'] + ".bai"):
+    if not os.path.exists(record['src_filename'] + ".csi"):
         # make index on source location
-        subprocess.check_call(['samtools', 'index', record['src_filename']])
-    makesymlink(record['src_filename'] + ".bai", record['new_filename'] + ".bai")
+        subprocess.check_call(['samtools', 'index','-c', record['src_filename']])
+    makesymlink(record['src_filename'] + ".csi", record['new_filename'] + ".csi")
 
     bam = os.path.basename(record['new_filename'])
     conf_str = "\n".join(
         [F"[tracks.{record['label']}]", F"urlTemplate={bam}",
          "storeClass=JBrowse/Store/SeqFeature/BAM", F"type={record['type']}",
+         F"csiUrlTemplate={bam}.csi",
          F"label={record['label']}", F"category={record['category']}",
-         F"style.color={record['color']}", "\n"]
+         "\n"]
         )
     f.write(conf_str)
+
+def add_general_track_settings2(record):
+    """ add general track settings"""
+    conf_str = "\n".join(
+        [F"chunkSizeLimit={record['chunkSizeLimit']}",
+         F"style.color={record['color']}",
+         F"histograms.color={record['color']}",
+         F"histograms.height={record['histograms.height']}",
+         F"displayMode={record['displayMode']}",
+         "\n"]
+        )
+    return conf_str
+
+
+def add_general_track_settings(record):
+    """check for additional settings available in record
+    """
+    excluded_keys = ['type', 'src_filename', 'new_filename', 'label', 'category',
+                     'color', 'new_src_filename', 'dirname', 'filename', 'format']
+    conf_str = ""
+    for key, value in record.items():
+        if key not in excluded_keys:
+            if value != '':
+                conf_str += F"{key}={value}\n"
+    conf_str += "\n"
+    return conf_str
 
 
 def add_gff3(record, f):
@@ -183,11 +220,8 @@ def add_gff3(record, f):
         conf_str = "\n".join(
             [F"[tracks.{record['label']}]", F"urlTemplate={gffformated}",
              "storeClass=JBrowse/Store/SeqFeature/GFF3Tabix", F"type={record['type']}",
-             F"label={record['label']}", F"category={record['category']}",
-             F"style.color={record['color']}",
-             F"histograms.color={record['color']},"
-             "\n"]
-
+             F"label={record['label']}", F"category={record['category']}\n"
+             ]
             )
     else:
         print("csi index found")
@@ -195,36 +229,45 @@ def add_gff3(record, f):
             [F"[tracks.{record['label']}]", F"urlTemplate={gffformated}",
              F"csiUrlTemplate={gffformated}.csi",
              "storeClass=JBrowse/Store/SeqFeature/GFF3Tabix", F"type={record['type']}",
-             F"label={record['label']}", F"category={record['category']}",
-             F"style.color={record['color']}",
-             F"histograms.color={record['color']}",
-             "\n"]
+             F"label={record['label']}", F"category={record['category']}\n"
+             ]
             )
+
+    # add link to bigwig file if exist
+    print("--checking if bigwig file exist--")
+    print(gffformated_full_path + ".bw")
+    if os.path.exists(gffformated_full_path + ".bw"):
+        print('bigwig file exist, adding to track configuration')
+        conf_str += "histograms.storeClass=JBrowse/Store/SeqFeature/BigWig\n"
+        conf_str += F"histograms.urlTemplate={gffformated}.bw\n"
+    conf_str += add_general_track_settings(record)
+    
     f.write(conf_str)
 
 def add_bed(record, f):
     """ convert bed to tabix format and return bed track configuration"""
     bedformated = bed_to_tabix(record)
+    bedformated_full_path = os.path.join(args.output_dir, bedformated)
     # check if tbi index is available
-    if os.path.exists(bedformated + ".tbi"):
+    print("checking if tbi index is available: " + bedformated + ".tbi")
+    if os.path.exists(bedformated_full_path + ".tbi"):
+        print("tbi index found")
         conf_str = "\n".join(
             [F"[tracks.{record['label']}]", F"urlTemplate={bedformated}",
              "storeClass=JBrowse/Store/SeqFeature/BEDTabix", F"type={record['type']}",
              F"label={record['label']}", F"category={record['category']}",
-             F"style.color={record['color']}",
-             F"histograms.color={record['color']},"
              "\n"]
             )
     else:
+        print("tbi index not found, trying with csi index")
         conf_str = "\n".join(
             [F"[tracks.{record['label']}]", F"urlTemplate={bedformated}",
              F"csiUrlTemplate={bedformated}.csi",
              "storeClass=JBrowse/Store/SeqFeature/BEDTabix", F"type={record['type']}",
              F"label={record['label']}", F"category={record['category']}",
-             F"style.color={record['color']}",
-             F"histograms.color={record['color']}",
              "\n"]
             )
+    conf_str += add_general_track_settings(record)
     f.write(conf_str)
 
 
@@ -303,8 +346,9 @@ def add_bigwig(record, f):
         [F"[tracks.{record['label']}]", F"urlTemplate={bigwig}",
          "storeClass=JBrowse/Store/SeqFeature/BigWig", F"type={record['type']}",
          F"label={record['label']}", F"category={record['category']}",
-         F"style.pos_color={record['color']}", "\n"]
+         "\n"]
         )
+    conf_str += add_general_track_settings(record)
     f.write(conf_str)
 
 
