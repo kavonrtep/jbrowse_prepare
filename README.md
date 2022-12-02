@@ -16,7 +16,7 @@ Script uses csv table as input to create and formate reference and track. For co
 
 first row is header, second row must be reference genome!
 
-##Install requirements:
+## Install requirements:
 
      conda install -c conda-forge -c biconda jbrowse \
      ucsc-fatotwobit gff3sort tabix samtools blast blat \
