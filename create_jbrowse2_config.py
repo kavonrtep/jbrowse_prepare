@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 ''' parse table with tracks for jbrowse2 and create config.json file '''
 import shutil
 
@@ -12,6 +12,23 @@ import os
 import sys
 import csv
 from shlex import quote
+
+
+def bedpe2bed(bedpe_file, bed_file):
+    # new bed wil be in format chrom [(S1+E1)/2]   [(S2+E2)/2]
+    with open(bedpe_file, "r") as fin, open(bed_file, "w") as fout:
+        for line in fin:
+            items = line.strip().split("\t")
+            if items[0] != items[3]:
+                print("chromosomes in bedpe line are not the same")
+                print("skipping line")
+                continue
+            coord1 = int(int(items[1]) + int(items[2]))/2
+            coord2 = int(int(items[4]) + int(items[5]))/2
+            if coord1 > coord2:
+                coord1, coord2 = coord2, coord1
+            fout.write(F"{items[0]}\t{coord1}\t{coord2}\n")
+
 
 
 
@@ -33,9 +50,15 @@ def read_config(config_file, directory):
                 print('duplicated label:', record['label'])
                 sys.exit('labels must be unique, exiting...')
             labels.add(record['label'])
-            record['new_filename'] = os.path.join(
-                directory, F"{assembly_name}_{record['label']}.{record['format']}"
-                )
+            if record['format'] == 'bedpe':
+                # this is special case, bedpe is not correctly implemented in jbrowse
+                record['new_filename'] = os.path.join(
+                        directory, F"{assembly_name}_{record['label']}.bed"
+                        )
+            else:
+                record['new_filename'] = os.path.join(
+                        directory, F"{assembly_name}_{record['label']}.{record['format']}"
+                        )
             record['src_filename'] = os.path.join(
                 record['dirname'], record['filename']
                 )
@@ -93,6 +116,12 @@ def get_config_string(track):
                                 "renderer": {"color": color,
                                              "type": "ArcRenderer",
                                              "label": ""}}]}
+    if track['format'] == 'bedpe' and track['type'] == 'arcs':
+        config = {"displays": [{"displayId": track['label'], "type": "LinearArcDisplay",
+                                "renderer": {"color": color,
+                                             "type": "ArcRenderer",
+                                             "label": ""}}]}
+
 
     if config!= '':
         # escape quotes in config string
@@ -170,6 +199,21 @@ def sort_and_index(track):
             cmd = F"tabix -C -p gff {quote(sortfilegz)}"
             subprocess.check_call(cmd, shell=True)
         return sortfilegz
+    # BEDPE
+    if track['format'] == 'bedpe':
+        # this should not be used, only if jbrowse implementation for bedpe is fixed
+        print("WARNING: BEDPE tracks are not supported in jbrowse, use bed + arcs "
+              "instead")
+        if os.path.exists(sortfilegz) and os.path.exists(indexfilegz):
+            print(F"sorted and indexed file {sortfilegz} exists, skipping...")
+        else:
+            cmd = F"sort -k1,1 -k2,2n -k4,4n {quote(track['new_filename'])} > {quote(sortfile)}"
+            subprocess.check_call(cmd, shell=True)
+            cmd = F"bgzip {quote(sortfile)}"
+            subprocess.check_call(cmd, shell=True)
+            cmd = F"tabix -C -p bed {quote(sortfilegz)}"
+            subprocess.check_call(cmd, shell=True)
+        return sortfilegz
     # BAM
     if track['format'] == 'bam':
         if os.path.exists(sortfile) and os.path.exists(indexfile):
@@ -213,11 +257,23 @@ if __name__ == "__main__":
 
 
     for track in track_list:
+        print("track:", track['label'])
+        print("format:", track['format'])
+        print("//////////////////////////////////////////")
         if not os.path.exists(track['new_filename']):
-            print('copying file:', track['src_filename'])
-            print('to:', track['new_filename'])
-            # use shutil.copy2 to keep file metadata
-            shutil.copy(track['src_filename'], track['new_filename'])
+            if track['format'] == 'bedpe':
+                # this is not implemented correctly in jbrowse
+                # convert bedpe to bed.
+                bedpe2bed(track['src_filename'], track['new_filename'])
+                track['format'] = 'bed'
+                track['type'] = 'arcs'
+                print('converting bedpe to bed:', track['src_filename'])
+                print("========================================")
+            else:
+                print('copying file:', track['src_filename'])
+                print('to:', track['new_filename'])
+                # use shutil.copy2 to keep file metadata
+                shutil.copy(track['src_filename'], track['new_filename'])
 
         else:
             print('file already exists:', track['new_filename'])
