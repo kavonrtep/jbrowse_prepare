@@ -1,4 +1,6 @@
 #!/usr/bin/env python
+import hashlib
+
 import os
 
 import shutil
@@ -25,7 +27,7 @@ def read_table(table_file) -> List[Dict[str, str]]:
     return table
 
 def get_synteny_track_from_paf(genome1, genome2, paf):
-    track_id = hash((genome1, genome2, paf))  # to get unique track id
+    track_id = hashlib.md5((genome1 + genome2 + paf).encode()).hexdigest()  # to get unique track id
     track_id = F"{genome1}_{genome2}_{track_id}"
     json_template =  {
             "type": "SyntenyTrack",

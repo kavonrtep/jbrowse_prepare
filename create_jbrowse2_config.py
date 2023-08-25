@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 ''' parse table with tracks for jbrowse2 and create config.json file '''
+import hashlib
+
 import shutil
 
 import json
@@ -85,7 +87,13 @@ def create_reference(ref_path, outdir, assembly_name):
     )
     print(cmd)
     subprocess.check_call(cmd, shell=True)
-
+    # create chromsize file from indexfile
+    chromsize_file = F"{ref_path}.chromsizes"
+    if not os.path.exists(chromsize_file):
+        with open(indexfile, 'r') as fin, open(chromsize_file, 'w') as fout:
+            for line in fin:
+                items = line.strip().split("\t")
+                fout.write(F"{items[0]}\t{items[1]}\n")
     print('')
 
 
@@ -96,28 +104,40 @@ def get_config_string(track):
     setting is specific base on the track format"""
     config = ''
     color = track['color'] if track['color'] else 'goldenrod'
+    if "displayMode" in track:
+        displayMode = track['displayMode'] if track['displayMode'] else 'normal'
+    else:
+        displayMode = 'normal'
 
+    md5sum = hashlib.md5(track['new_filename'].encode('utf-8')).hexdigest() + "_d"
+    displayId = F"{track['label']}_{md5sum}"
+    showLabels = True
+    if "showLabels" in track:
+        if track['showLabels'].lower() == 'false':
+            showLabels = False
 
     if track['format'] == 'bigwig':
-        config = {"displays": [{"displayId": track['label'], "type":
+        config = {"displays": [{"displayId": displayId, "type":
             "LinearWiggleDisplay",
                                 "renderers": {"XYPlotRenderer": {"color": color,
                                     "type": "XYPlotRenderer"}}}]}
     if track['format'] == 'bed' and track['type'] != 'arcs':
-        config = {"displays": [{"displayId": track['label'], "type": "LinearBasicDisplay",
+        config = {"displays": [{"displayId": displayId, "type": "LinearBasicDisplay",
                                 "renderer": {"color1": color,
                                              "type": "SvgFeatureRenderer"}}]}
     if track['format'] == 'gff3':
-        config = {"displays": [{"displayId": track['label'], "type": "LinearBasicDisplay",
+        config = {"displays": [{"displayId": displayId, "type": "LinearBasicDisplay",
                                 "renderer": {"color1": color,
-                                             "type": "SvgFeatureRenderer"}}]}
+                                             "type": "SvgFeatureRenderer",
+                                             "displayMode": displayMode,
+                                             "showLabels": showLabels}}]}
     if track['format'] == 'bed' and track['type'] == 'arcs':
-        config = {"displays": [{"displayId": track['label'], "type": "LinearArcDisplay",
+        config = {"displays": [{"displayId": displayId, "type": "LinearArcDisplay",
                                 "renderer": {"color": color,
                                              "type": "ArcRenderer",
                                              "label": ""}}]}
     if track['format'] == 'bedpe' and track['type'] == 'arcs':
-        config = {"displays": [{"displayId": track['label'], "type": "LinearArcDisplay",
+        config = {"displays": [{"displayId": displayId, "type": "LinearArcDisplay",
                                 "renderer": {"color": color,
                                              "type": "ArcRenderer",
                                              "label": ""}}]}
@@ -126,6 +146,7 @@ def get_config_string(track):
     if config!= '':
         # escape quotes in config string
         config_str = json.dumps(config).replace('"', '\\"')
+        print('config string:', config_str)
         cfg_cmd = "--config \"" + config_str  + "\""
     else:
         cfg_cmd = ''
@@ -142,18 +163,26 @@ def add_track(track, outdir, assembly_name):
     # check is csi index exists, is so use it in add-track command
     indexfile = F"{track['new_filename']}.csi"
     cfg_cmd = get_config_string(track)
+    md5sum = hashlib.md5(track['new_filename'].encode('utf-8')).hexdigest()
+    trackId = F"{track['label']}_{md5sum}"
+    print("+++++++++++++++++++++++++++++++++++++++++++++++++++++")
+    print(F"{track['label']}_{track['new_filename']}")
+    print('trackId:', trackId)
+    print("+++++++++++++++++++++++++++++++++++++++++++++++++++++")
     if os.path.exists(indexfile):
         # use index:
         cmd = (F"jbrowse add-track {quote(track['new_filename'])} --out {outdir} "
-               F"--load inPlace --trackId {quote(track['label'])} --indexFile"
+               F"--load inPlace --trackId {quote(trackId)} --indexFile"
                F" {quote(indexfile)} "
                F" --category {quote(track['category'])}"
+               F" --name {quote(track['label'])}"
                F" {cfg_cmd} --assemblyNames {quote(assembly_name)} --overwrite")
         print(cmd)
     else:
         cmd = (F"jbrowse add-track {quote(track['new_filename'])} --out {outdir} "
-               F"--load inPlace --trackId {quote(track['label'])} "
+               F"--load inPlace --trackId {quote(trackId)} "
                F" --category {quote(track['category'])} --overwrite"
+               F" --name {quote(track['label'])}"
                F" {cfg_cmd} --assemblyNames {quote(assembly_name)}")
         print(cmd)
     try:
@@ -164,7 +193,35 @@ def add_track(track, outdir, assembly_name):
 
     print('')
 
-def sort_and_index(track):
+def guess_file_format(filepath):
+    with open(filepath, 'rb') as f:
+        # Read the first few bytes to check for the BigWig magic number
+        header = f.read(4)
+        if header in [b'\x88\x8F\xFC\x26', b'\x26\xFC\x8F\x88']:
+            return "BigWig"
+    # Check for BedGraph format
+    with open(filepath, 'r', errors='ignore') as f:
+        lines_checked = 0
+        for line in f:
+            columns = line.strip().split()
+            if len(columns) < 4:
+                continue
+            try:
+                int(columns[1])  # Test if the 2nd column is an integer
+                int(columns[2])  # Test if the 3rd column is an integer
+                float(columns[3])  # Test if the 4th column is a float
+                return "BedGraph"
+            except ValueError:
+                # If casting fails, move on to the next line
+                pass
+            lines_checked += 1
+            if lines_checked > 10:  # You can adjust the number of lines you want to check
+                break
+    return "Unknown"
+
+
+
+def sort_and_index(track, assembly_name):
     """
     sort and index track, handles bed,  gff and bam files, bigwig files are already sorted
     use always CSI index for every file
@@ -225,6 +282,28 @@ def sort_and_index(track):
             subprocess.check_call(cmd, shell=True)
         return sortfile
     if track['format'] == 'bigwig':
+        # check if it is really bigwig and not bedgraph
+        if guess_file_format(track['new_filename']) == 'BigWig':
+            print(F"file {track['new_filename']} - format OK")
+        else:
+            print(F"file {track['new_filename']} is not bigwig but bedgraph, converting "
+                  F"to bigwig...")
+            chrsizes =  F"{assembly_name}_{assembly_name}.fasta.chromsizes"
+            script_path = os.path.dirname(os.path.realpath(__file__))
+            bgr_file = F"{track['new_filename']}"
+            bgr_file_sorted = F"{track['new_filename']}.sorted"
+            bw_file = F"{track['new_filename']}.bigwig"
+            # sort bedgraph
+            cmd = F"sort -k1,1 -k2,2n {quote(bgr_file)} | cut -f 1-4 >" \
+                  F" {quote(bgr_file_sorted)}"
+            subprocess.check_call(cmd, shell=True)
+            # replace bgr_file with bw_file
+            cmd = (F"{script_path}/bedGraphToBigWig {quote(bgr_file_sorted)} "
+                   F"{quote(chrsizes)} {quote(bw_file)}")
+            subprocess.check_call(cmd, shell=True)
+            shutil.move(bw_file, bgr_file)
+        print('-------x-x-x-x-x bigwig_file:')
+        print(track['new_filename'])
         return track['new_filename']
     print('format not recognized, skipping sorting and indexing')
     print(track['format'])
@@ -283,7 +362,7 @@ if __name__ == "__main__":
     create_reference(ref_path, args.output_dir, assembly_name)
     for track in track_list[1:]:
         # sort and make index:
-        track['new_filename'] = sort_and_index(track)
+        track['new_filename'] = sort_and_index(track, assembly_name)
         print('adding track:', track['label'])
         add_track(track, args.output_dir, assembly_name)
         print("----------------------------------------")
