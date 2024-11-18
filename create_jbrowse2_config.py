@@ -61,6 +61,7 @@ def read_config(config_file, directory):
                 record['new_filename'] = os.path.join(
                         directory, F"{assembly_name}_{record['label']}.{record['format']}"
                         )
+            print(record)
             record['src_filename'] = os.path.join(
                 record['dirname'], record['filename']
                 )
@@ -117,7 +118,7 @@ def get_config_string(track):
             showLabels = False
 
     if track['format'] == 'bigwig':
-        config = {"displays": [{"displayId": displayId, "type":
+        config = {"displays": [{"displayId": displayId, "autoscale": "global", "type":
             "LinearWiggleDisplay",
                                 "renderers": {"XYPlotRenderer": {"color": color,
                                     "type": "XYPlotRenderer"}}}]}
@@ -135,6 +136,9 @@ def get_config_string(track):
         config = {"displays": [{"displayId": displayId, "type": "LinearArcDisplay",
                                 "renderer": {"color": color,
                                              "type": "ArcRenderer",
+                                             "height": "jexl:log10(get(feature,"
+                                                       "'end')-get(feature,'start'))*20",
+                                             "displayMode": displayMode,
                                              "label": ""}}]}
     if track['format'] == 'bedpe' and track['type'] == 'arcs':
         config = {"displays": [{"displayId": displayId, "type": "LinearArcDisplay",
@@ -221,20 +225,21 @@ def guess_file_format(filepath):
 
 
 
-def sort_and_index(track, assembly_name):
+def sort_and_index(track, assembly_name, force=False):
     """
     sort and index track, handles bed,  gff and bam files, bigwig files are already sorted
     use always CSI index for every file
     """
-    # check if sortet.gz and csi index exists, in not create them
+    # check if sorted.gz and csi index exists, if not create them
 
     sortfilegz = F"{track['new_filename']}.sorted.{track['format']}.gz"
     sortfile = F"{track['new_filename']}.sorted.{track['format']}"
     indexfile = F"{track['new_filename']}.sorted.{track['format']}.csi"
     indexfilegz = F"{track['new_filename']}.sorted.{track['format']}.gz.csi"
     # BED
+
     if track['format'] == 'bed':
-        if os.path.exists(sortfilegz) and os.path.exists(indexfilegz):
+        if os.path.exists(sortfilegz) and os.path.exists(indexfilegz) and not force:
             print(F"sorted and indexed file {sortfilegz} exists, skipping...")
         else:
             cmd = F"sort -k1,1 -k2,2n {quote(track['new_filename'])} > {quote(sortfile)}"
@@ -246,7 +251,7 @@ def sort_and_index(track, assembly_name):
         return sortfilegz
     # GFF
     if track['format'] == 'gff' or track['format'] == 'gff3':
-        if os.path.exists(sortfilegz) and os.path.exists(indexfilegz):
+        if os.path.exists(sortfilegz) and os.path.exists(indexfilegz) and not force:
             print(F"sorted and indexed file {sortfilegz} exists, skipping...")
         else:
             cmd = F"sort -k1,1 -k4,4n {quote(track['new_filename'])} > {quote(sortfile)}"
@@ -261,7 +266,7 @@ def sort_and_index(track, assembly_name):
         # this should not be used, only if jbrowse implementation for bedpe is fixed
         print("WARNING: BEDPE tracks are not supported in jbrowse, use bed + arcs "
               "instead")
-        if os.path.exists(sortfilegz) and os.path.exists(indexfilegz):
+        if os.path.exists(sortfilegz) and os.path.exists(indexfilegz) and not force:
             print(F"sorted and indexed file {sortfilegz} exists, skipping...")
         else:
             cmd = F"sort -k1,1 -k2,2n -k4,4n {quote(track['new_filename'])} > {quote(sortfile)}"
@@ -273,7 +278,7 @@ def sort_and_index(track, assembly_name):
         return sortfilegz
     # BAM
     if track['format'] == 'bam':
-        if os.path.exists(sortfile) and os.path.exists(indexfile):
+        if os.path.exists(sortfile) and os.path.exists(indexfile) and not force:
             print(F"sorted and indexed file {sortfile} exists, skipping...")
         else:
             cmd = F"samtools sort {quote(track['new_filename'])} -o {quote(sortfile)}"
@@ -297,6 +302,26 @@ def sort_and_index(track, assembly_name):
             cmd = F"sort -k1,1 -k2,2n {quote(bgr_file)} | cut -f 1-4 >" \
                   F" {quote(bgr_file_sorted)}"
             subprocess.check_call(cmd, shell=True)
+            # verify that all intervals are within the chromosome sizes, if not remove them
+            # for example epyc2 sometimes reports intervals that are outside of the
+            # chromosome!
+            def filter_intervals_by_chromsizes(bedgraph_file, chromsizes_file):
+                with open(chromsizes_file, 'r') as f:
+                    chromsizes = {}
+                    for line in f:
+                        chrom, size = line.strip().split()
+                        chromsizes[chrom] = int(size)
+                with open(bedgraph_file, 'r') as f, open(F"{bedgraph_file}.tmp", 'w') as fout:
+                    for line in f:
+                        chrom, start, end, score = line.strip().split()
+                        if chrom in chromsizes and int(end) <= chromsizes[chrom]:
+                             fout.write(line)
+                        else:
+                            print(F"removing interval {chrom}:{start}-{end}")
+                shutil.move(F"{bedgraph_file}.tmp", bedgraph_file)
+
+            filter_intervals_by_chromsizes(bgr_file_sorted, chrsizes)
+
             # replace bgr_file with bw_file
             cmd = (F"{script_path}/bedGraphToBigWig {quote(bgr_file_sorted)} "
                    F"{quote(chrsizes)} {quote(bw_file)}")
@@ -316,6 +341,8 @@ if __name__ == "__main__":
     parser.add_argument('-d', '--output_dir', type=str, default="data")
     parser.add_argument("-c", "--config_table", required=True)
     parser.add_argument("-u", "--update", action="store_true", default=False)
+    parser.add_argument("-f", "--force", action="store_true", default=False,
+                        help="force overwrite of existing files")
     args = parser.parse_args()
 
     track_list = read_config(args.config_table, args.output_dir)
@@ -339,7 +366,7 @@ if __name__ == "__main__":
         print("track:", track['label'])
         print("format:", track['format'])
         print("//////////////////////////////////////////")
-        if not os.path.exists(track['new_filename']):
+        if not os.path.exists(track['new_filename']) or args.force:
             if track['format'] == 'bedpe':
                 # this is not implemented correctly in jbrowse
                 # convert bedpe to bed.
@@ -362,7 +389,7 @@ if __name__ == "__main__":
     create_reference(ref_path, args.output_dir, assembly_name)
     for track in track_list[1:]:
         # sort and make index:
-        track['new_filename'] = sort_and_index(track, assembly_name)
+        track['new_filename'] = sort_and_index(track, assembly_name, args.force)
         print('adding track:', track['label'])
         add_track(track, args.output_dir, assembly_name)
         print("----------------------------------------")
