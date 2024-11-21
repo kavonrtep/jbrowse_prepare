@@ -3,6 +3,7 @@
 import os
 import pandas as pd
 import subprocess
+from paf_chain_filter import merge_paf_intervals
 
 # Constants
 GENOMES_CSV = 'genomes.csv'       # Contains headers: genome, abs_path
@@ -284,10 +285,12 @@ with open(synteny_paf_tracks_csv, 'w') as paf_csv:
             # Define output PAF files
             outpaf = f"{genome1}_{genome2}.oligo.paf"
             outpaf_sample = f"{genome1}_{genome2}.oligo_sample.paf"
+            outpaf_chain = f"{genome1}_{genome2}.oligo_chained.paf"
 
             # Write to synteny_paf_tracks.csv
             paf_csv.write(f"{genome1}\t{genome2}\t{outpaf}\n")
             paf_csv.write(f"{genome1}\t{genome2}\t{outpaf_sample}\n")
+            paf_csv.write(f"{genome1}\t{genome2}\t{outpaf_chain}\n")
 
             # Run make_paf_from_probes.R
             if not os.path.exists(outpaf):
@@ -310,6 +313,10 @@ with open(synteny_paf_tracks_csv, 'w') as paf_csv:
                     '-o', outpaf_sample
                 ]
                 subprocess.run(cmd_paf_sample)
+            if not os.path.exists(outpaf_chain):
+                merge_paf_intervals(outpaf, outpaf_chain, tolerance_percent=15,
+                                    min_intervals=10)
+
 
 # Step 9: Run add_synteny_tracks_from_paf.py
 config_json = 'config.json'

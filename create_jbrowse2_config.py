@@ -132,13 +132,13 @@ def get_config_string(track):
                                              "type": "SvgFeatureRenderer",
                                              "displayMode": displayMode,
                                              "showLabels": showLabels}}]}
+    # arcs do not have displayMode!
     if track['format'] == 'bed' and track['type'] == 'arcs':
         config = {"displays": [{"displayId": displayId, "type": "LinearArcDisplay",
                                 "renderer": {"color": color,
                                              "type": "ArcRenderer",
                                              "height": "jexl:log10(get(feature,"
                                                        "'end')-get(feature,'start'))*20",
-                                             "displayMode": displayMode,
                                              "label": ""}}]}
     if track['format'] == 'bedpe' and track['type'] == 'arcs':
         config = {"displays": [{"displayId": displayId, "type": "LinearArcDisplay",
@@ -394,5 +394,16 @@ if __name__ == "__main__":
         add_track(track, args.output_dir, assembly_name)
         print("----------------------------------------")
         print("----------------------------------------")
-        print("----------------------------------------")
+
+    # add configuration to json file
+    json_file = os.path.join(args.output_dir, 'config.json')
+    # load json file
+    with open(json_file, 'r') as f:
+        data = json.load(f)
+    # add configuration to json file
+    # "configuration": {"logoPath": {"uri": "./elixir_150x48.svg"}},
+    data["configuration"] = {"logoPath": {"uri": "./elixir_150x48.svg"}}
+    # write to json file
+    with open(json_file, 'w') as f:
+        json.dump(data, f, indent=4)
 
