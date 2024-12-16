@@ -229,6 +229,15 @@ def merge_paf_intervals(input_file, output_file, tolerance_percent, min_interval
 if __name__ == '__main__':
     import argparse
 
+    description = """
+    Merges PAF alignments by chaining intervals into larger ones based on the same order
+    and similar distances in both genome assemblies within a specified tolerance.
+    PAF file is sorted based on qname and qstart before processing.
+    Coordinates are handled according to the PAF specification.
+    Chains with fewer intervals than 'min_intervals' are discarded.
+    
+    """
+
     parser = argparse.ArgumentParser(description='Merge PAF alignments by chaining intervals based on similar distances within a tolerance.')
     parser.add_argument('input_paf', help='Input PAF file')
     parser.add_argument('output_paf', help='Output PAF file with merged alignments')
@@ -237,6 +246,8 @@ if __name__ == '__main__':
     parser.add_argument('-m', '--min-intervals', type=int, default=1,
                         help='Minimum number of merged intervals required to keep a chain (default: 1)')
 
+    # add description
+    parser.description = description
     args = parser.parse_args()
 
     merge_paf_intervals(args.input_paf, args.output_paf, args.tolerance, args.min_intervals)

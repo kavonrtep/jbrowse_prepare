@@ -125,6 +125,7 @@ def get_config_string(track):
     if track['format'] == 'bed' and track['type'] != 'arcs':
         config = {"displays": [{"displayId": displayId, "type": "LinearBasicDisplay",
                                 "renderer": {"color1": color,
+                                             "displayMode": displayMode,
                                              "type": "SvgFeatureRenderer"}}]}
     if track['format'] == 'gff3':
         config = {"displays": [{"displayId": displayId, "type": "LinearBasicDisplay",
