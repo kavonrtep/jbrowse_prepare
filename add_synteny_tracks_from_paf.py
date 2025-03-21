@@ -45,7 +45,8 @@ def get_synteny_track_from_paf(genome1, genome2, paf):
                     "locationType": "UriLocation",
                     "uri": F"./{paf}"
                 }
-            }
+            },
+            "category": ["Synteny"],
         }
     return json_template
 

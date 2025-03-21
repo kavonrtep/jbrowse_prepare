@@ -1,9 +1,295 @@
 #!/usr/bin/env python3
-
+import json
 import os
 import pandas as pd
 import subprocess
 from paf_chain_filter import merge_paf_intervals
+def add_hic(genomes_df, output_config_json):
+    # Load existing config
+    if not os.path.exists(output_config_json):
+        print(f"Warning: {output_config_json} not found. Cannot add Hi-C tracks.")
+        return
+
+    with open(output_config_json, 'r') as f:
+        config_data = json.load(f)
+
+    if "tracks" not in config_data:
+        config_data["tracks"] = []
+
+    # For each genome, check if hic file exists: genome_abs_path + ".hic"
+    for idx, row in genomes_df.iterrows():
+        genome_name = row['genome']
+        genome_abs_path = row['abs_path']
+        hic_file = genome_abs_path + ".hic"
+        if os.path.exists(hic_file):
+            # Create symlink
+            hic_symlink = f"{genome_name}.hic"
+            if not os.path.exists(hic_symlink):
+                os.symlink(hic_file, hic_symlink)
+                print(f"Created symlink {hic_symlink} -> {hic_file}")
+            else:
+                print(f"Symlink {hic_symlink} already exists")
+
+            # Add HicTrack configuration
+            hic_track = {
+                "type": "HicTrack",
+                "trackId": f"hic_{genome_name}",
+                "name": f"{genome_name} Hi-C",
+                "assemblyNames": [genome_name],
+                "adapter": {
+                    "type": "HicAdapter",
+                    "hicLocation": {
+                        "uri": f"./{hic_symlink}",
+                        "locationType": "UriLocation"
+                    }
+                },
+                "category": ["Hi-C"],
+            }
+
+            config_data["tracks"].append(hic_track)
+
+    # Save updated config
+    with open(output_config_json, 'w') as f:
+        json.dump(config_data, f, indent=2)
+    print(f"Updated {output_config_json} with Hi-C tracks.")
+
+def add_read_mapping(genomes_df, output_config_json):
+
+    # Load the existing config
+    if not os.path.exists(output_config_json):
+        print(f"Warning: {output_config_json} not found. Cannot add read mapping tracks.")
+        return
+
+    with open(output_config_json, 'r') as f:
+        config_data = json.load(f)
+
+    if "tracks" not in config_data:
+        config_data["tracks"] = []
+
+    # For each genome, check for BAM files in the assembly directory
+    for idx, row in genomes_df.iterrows():
+        genome_name = row['genome']
+        assembly_fasta = row['abs_path']
+        assembly_dir = os.path.dirname(assembly_fasta)
+
+        # List all files ending with .bam in the assembly directory
+        try:
+            bam_files = [f for f in os.listdir(assembly_dir) if f.endswith('.bam')]
+
+        except Exception as e:
+            print(f"Error reading directory {assembly_dir} for genome {genome_name}: {e}")
+            continue
+
+        if not bam_files:
+            continue
+
+        for bam_file in bam_files:
+            bam_path = os.path.join(assembly_dir, bam_file)
+            # Determine the expected index file name: assume it's BAM file plus .csi
+            bam_index_path = bam_path + ".csi"
+
+            # If the index file does not exist, create it with samtools using --csi option
+            if not os.path.exists(bam_index_path):
+                print(f"Index file {bam_index_path} not found; creating with samtools...")
+                subprocess.run(['samtools', 'index', '--csi', bam_path], check=True)
+
+            # Define a base track name from the BAM file (without .bam)
+            track_basename = os.path.splitext(bam_file)[0]
+
+            # Create symlinks in the current directory for the BAM and its index,
+            # using a naming scheme that includes the genome and track name.
+            bam_symlink = f"{genome_name}_{track_basename}.bam"
+            index_symlink = f"{genome_name}_{track_basename}.bam.csi"
+            if not os.path.exists(bam_symlink):
+                os.symlink(bam_path, bam_symlink)
+                print(f"Created symlink {bam_symlink} -> {bam_path}")
+            else:
+                print(f"Symlink {bam_symlink} already exists")
+            if not os.path.exists(index_symlink):
+                os.symlink(bam_index_path, index_symlink)
+                print(f"Created symlink {index_symlink} -> {bam_index_path}")
+            else:
+                print(f"Symlink {index_symlink} already exists")
+
+            # Create BigWig file from the BAM using deeptools bamCoverage.
+            # The output file is named with the genome and track basename.
+            bigwig_file = f"{genome_name}_{track_basename}.bw"
+            if not os.path.exists(bigwig_file):
+                print(f"Creating BigWig file {bigwig_file} from {bam_symlink} using bamCoverage...")
+                bamCoverage_cmd = ['bamCoverage', '-b', bam_symlink, '-o', bigwig_file]
+                subprocess.run(bamCoverage_cmd, check=True)
+            else:
+                print(f"BigWig file {bigwig_file} already exists")
+
+            # Create track configuration for the BAM read mapping track.
+            bam_track = {
+                "type": "AlignmentsTrack",
+                "trackId": f"readmap_{genome_name}_{track_basename}",
+                "name": f"{track_basename} Read Mapping",
+                "assemblyNames": [genome_name],
+                "adapter": {
+                    "type": "BamAdapter",
+                    "bamLocation": {
+                        "uri": f"./{bam_symlink}",
+                        "locationType": "UriLocation"
+                    },
+                    "index": {
+                        "uri": f"./{index_symlink}",
+                        "locationType": "UriLocation"
+                    }
+                },
+                "category": ["Read mapping"]
+            }
+            config_data["tracks"].append(bam_track)
+
+            # Create track configuration for the BigWig coverage track.
+            bigwig_track = {
+                "type": "JBrowse/View/Track/Wiggle/XYPlot",
+                "trackId": f"bigwig_{genome_name}_{track_basename}",
+                "name": f"{track_basename} Coverage",
+                "assemblyNames": [genome_name],
+                "adapter": {
+                    "type": "BigWigAdapter",
+                    "bigwigLocation": {
+                        "uri": f"./{bigwig_file}",
+                        "locationType": "UriLocation"
+                    }
+                },
+                "category": ["Read mapping"]
+            }
+            config_data["tracks"].append(bigwig_track)
+
+    # Save the updated configuration
+    with open(output_config_json, 'w') as f:
+        json.dump(config_data, f, indent=2)
+    print(f"Updated {output_config_json} with read mapping tracks.")
+
+def add_read_mapping(genomes_df, output_config_json):
+    import os
+    import json
+    import subprocess
+
+    # Load the existing configuration
+    if not os.path.exists(output_config_json):
+        print(f"Warning: {output_config_json} not found. Cannot add read mapping tracks.")
+        return
+
+    with open(output_config_json, 'r') as f:
+        config_data = json.load(f)
+
+    if "tracks" not in config_data:
+        config_data["tracks"] = []
+
+    # For each genome, scan the assembly directory for BAM files
+    for idx, row in genomes_df.iterrows():
+        genome_name = row['genome']
+        assembly_fasta = row['abs_path']
+        assembly_dir = os.path.dirname(assembly_fasta)
+
+        try:
+            bam_files = [f for f in os.listdir(assembly_dir) if f.endswith('.bam')]
+        except Exception as e:
+            print(f"Error accessing directory {assembly_dir} for genome {genome_name}: {e}")
+            continue
+
+        if not bam_files:
+            continue
+
+        for bam_file in bam_files:
+            bam_path = os.path.join(assembly_dir, bam_file)
+            # The expected index is the BAM file with ".csi" appended
+            bam_index_path = bam_path + ".csi"
+
+            # Create the index if missing using samtools
+            if not os.path.exists(bam_index_path):
+                print(f"Index file {bam_index_path} not found; creating with samtools...")
+                subprocess.run(['samtools', 'index', '--csi', bam_path], check=True)
+
+            # Use the filename (without extension) as the track basename
+            track_basename = os.path.splitext(bam_file)[0]
+
+            # Create symlinks in the current directory for both BAM and its index
+            bam_symlink = f"{genome_name}_{track_basename}.bam"
+            index_symlink = f"{genome_name}_{track_basename}.bam.csi"
+            if not os.path.exists(bam_symlink):
+                os.symlink(bam_path, bam_symlink)
+                print(f"Created symlink {bam_symlink} -> {bam_path}")
+            else:
+                print(f"Symlink {bam_symlink} already exists")
+            if not os.path.exists(index_symlink):
+                os.symlink(bam_index_path, index_symlink)
+                print(f"Created symlink {index_symlink} -> {bam_index_path}")
+            else:
+                print(f"Symlink {index_symlink} already exists")
+
+            # Create BigWig file using bamCoverage (deeptools)
+            # Note: using .bigwig extension to match the expected configuration
+            bigwig_file = f"{genome_name}_{track_basename}.bigwig"
+            if not os.path.exists(bigwig_file):
+                print(f"Creating BigWig file {bigwig_file} from {bam_symlink} using bamCoverage...")
+                bamCoverage_cmd = ['bamCoverage', '-b', bam_symlink, '-o', bigwig_file]
+                subprocess.run(bamCoverage_cmd, check=True)
+            else:
+                print(f"BigWig file {bigwig_file} already exists")
+
+            # Add BAM track configuration for read mapping
+            bam_track = {
+                "type": "AlignmentsTrack",
+                "trackId": f"readmap_{genome_name}_{track_basename}",
+                "name": f"{track_basename} Read Mapping",
+                "assemblyNames": [genome_name],
+                "adapter": {
+                    "type": "BamAdapter",
+                    "bamLocation": {
+                        "uri": f"./{bam_symlink}",
+                        "locationType": "UriLocation"
+                    },
+                    "index": {
+                        "uri": f"./{index_symlink}",
+                        "locationType": "UriLocation"
+                    }
+                },
+                "category": ["Read mapping"]
+            }
+            config_data["tracks"].append(bam_track)
+
+            # Add BigWig track configuration with the correct format
+            bigwig_track = {
+                "type": "QuantitativeTrack",
+                "trackId": f"bigwig_{genome_name}_{track_basename}",
+                "name": f"{track_basename} Coverage",
+                "adapter": {
+                    "type": "BigWigAdapter",
+                    "bigWigLocation": {
+                        "uri": f"./{bigwig_file}",
+                        "locationType": "UriLocation"
+                    }
+                },
+                "category": ["Read mapping"],
+                "assemblyNames": [genome_name],
+                "displays": [
+                    {
+                        "displayId": f"bigwig_{genome_name}_{track_basename}_d",
+                        "autoscale": "global",
+                        "type": "LinearWiggleDisplay",
+                        "renderers": {
+                            "XYPlotRenderer": {
+                                "color": "red",  # Adjust color as needed
+                                "type": "XYPlotRenderer"
+                            }
+                        }
+                    }
+                ]
+            }
+            config_data["tracks"].append(bigwig_track)
+
+    # Write the updated configuration back to file
+    with open(output_config_json, 'w') as f:
+        json.dump(config_data, f, indent=2)
+    print(f"Updated {output_config_json} with read mapping tracks.")
+
+
+
 
 # Constants
 GENOMES_CSV = 'genomes.csv'       # Contains headers: genome, abs_path
@@ -322,9 +608,11 @@ with open(synteny_paf_tracks_csv, 'w') as paf_csv:
                 merge_paf_intervals(outpaf, outpaf_chain, tolerance_percent=15,
                                     min_intervals=10)
 
+config_json = 'config.json'
+add_hic(genomes_df, config_json)
+add_read_mapping(genomes_df, config_json)
 
 # Step 9: Run add_synteny_tracks_from_paf.py
-config_json = 'config.json'
 output_config_json = 'config_with_synteny.json'
 cmd_add_synteny = [
     ADD_SYNTENY_SCRIPT,
@@ -337,3 +625,7 @@ try:
     print(f"Generated final configuration with synteny tracks in {output_config_json}")
 except subprocess.CalledProcessError as e:
     print(f"Error running add_synteny_tracks_from_paf.py: {e}")
+
+
+
+
