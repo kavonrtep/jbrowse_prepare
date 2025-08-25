@@ -101,6 +101,8 @@ def create_reference(genome_name: str, ref_record: Dict, output_dir: str) -> str
     if not os.path.exists(ref_path):
         os.symlink(src_path, ref_path)
         print(f"Created symlink {ref_path} -> {src_path}")
+    else:
+        print(f"Skipping symlink creation (already exists): {ref_path}")
     
     # Create FAI index if it doesn't exist
     fai_path = f"{ref_path}.fai"
@@ -108,6 +110,8 @@ def create_reference(genome_name: str, ref_record: Dict, output_dir: str) -> str
         cmd = f"samtools faidx {quote(ref_path)}"
         subprocess.check_call(cmd, shell=True)
         print(f"Created FAI index: {fai_path}")
+    else:
+        print(f"Skipping FAI index creation (already exists): {fai_path}")
     
     # Add assembly to JBrowse2 (run from output directory to avoid path warnings)
     rel_ref_path = os.path.basename(ref_path)  # Use relative path within output dir
@@ -147,11 +151,14 @@ def sort_and_index_track(track_record: Dict, genome_name: str, output_dir: str) 
     if not os.path.exists(track_path):
         os.symlink(src_path, track_path)
         print(f"Created symlink {track_path} -> {src_path}")
+    else:
+        print(f"Skipping symlink creation (already exists): {track_path}")
     
     if track_format in ['gff3', 'gff']:
         # Sort and compress GFF3 files
         sorted_file = f"{track_path}.sorted.{track_format}.gz"
-        if not os.path.exists(sorted_file):
+        index_file = f"{sorted_file}.csi"
+        if not os.path.exists(sorted_file) or not os.path.exists(index_file):
             temp_sorted = f"{track_path}.sorted.{track_format}"
             cmd = f"sort -k1,1 -k4,4n {quote(track_path)} > {quote(temp_sorted)}"
             subprocess.check_call(cmd, shell=True)
@@ -160,12 +167,15 @@ def sort_and_index_track(track_record: Dict, genome_name: str, output_dir: str) 
             cmd = f"tabix -C -p gff {quote(sorted_file)}"
             subprocess.check_call(cmd, shell=True)
             print(f"Sorted and indexed GFF3: {sorted_file}")
+        else:
+            print(f"Skipping GFF3 sorting/indexing (already exists): {sorted_file}")
         return sorted_file
         
     elif track_format == 'bed':
         # Sort and compress BED files
         sorted_file = f"{track_path}.sorted.bed.gz"
-        if not os.path.exists(sorted_file):
+        index_file = f"{sorted_file}.csi"
+        if not os.path.exists(sorted_file) or not os.path.exists(index_file):
             temp_sorted = f"{track_path}.sorted.bed"
             cmd = f"sort -k1,1 -k2,2n {quote(track_path)} > {quote(temp_sorted)}"
             subprocess.check_call(cmd, shell=True)
@@ -174,6 +184,8 @@ def sort_and_index_track(track_record: Dict, genome_name: str, output_dir: str) 
             cmd = f"tabix -C -p bed {quote(sorted_file)}"
             subprocess.check_call(cmd, shell=True)
             print(f"Sorted and indexed BED: {sorted_file}")
+        else:
+            print(f"Skipping BED sorting/indexing (already exists): {sorted_file}")
         return sorted_file
         
     elif track_format == 'bam':
@@ -183,6 +195,8 @@ def sort_and_index_track(track_record: Dict, genome_name: str, output_dir: str) 
             cmd = f"samtools index -c {quote(track_path)}"
             subprocess.check_call(cmd, shell=True)
             print(f"Indexed BAM: {index_file}")
+        else:
+            print(f"Skipping BAM indexing (already exists): {index_file}")
         return track_path
         
     elif track_format == 'bigwig':
@@ -328,6 +342,8 @@ def create_synteny_tracks(genomes: Dict[str, List[Dict]], output_dir: str,
         
         if not os.path.exists(bed_file):
             blast_to_bed(blast_file, bed_file)
+        else:
+            print(f"Skipping BLAST to BED conversion (already exists): {bed_file}")
         
         bed_files[genome_name] = bed_file
     
@@ -363,12 +379,16 @@ def create_synteny_tracks(genomes: Dict[str, List[Dict]], output_dir: str,
                 ]
                 print(f"Generating PAF: {' '.join(cmd)}")
                 subprocess.run(cmd, check=True)
+            else:
+                print(f"Skipping PAF generation (already exists): {paf_file}")
             
             # Create chained PAF file
             paf_chained = os.path.join(output_dir, f"{genome1}_{genome2}_synteny_chained.paf")
             if not os.path.exists(paf_chained):
                 merge_paf_intervals(paf_file, paf_chained, tolerance_percent=15, min_intervals=10)
                 print(f"Created chained PAF: {paf_chained}")
+            else:
+                print(f"Skipping PAF chaining (already exists): {paf_chained}")
             
             # Create synteny track configuration
             track_id = f"synteny_{genome1}_{genome2}"
@@ -399,6 +419,12 @@ def create_jbrowse_config(genomes: Dict[str, List[Dict]], output_dir: str,
     """
     Create complete JBrowse2 configuration with all genomes and tracks.
     """
+    # Remove existing config.json to ensure fresh creation
+    config_file = os.path.join(output_dir, 'config.json')
+    if os.path.exists(config_file):
+        print('Removing old config.json file')
+        os.remove(config_file)
+    
     all_tracks = []
     
     # Process each genome
