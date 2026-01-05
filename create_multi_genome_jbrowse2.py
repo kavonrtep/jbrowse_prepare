@@ -75,10 +75,59 @@ def read_config_csv(csv_file: str) -> Dict[str, List[Dict]]:
     with open(csv_file, 'r') as f:
         reader = csv.DictReader(f, delimiter='\t')
         for row in reader:
-            genome = row['Genome'].strip()
+            # Skip empty rows or rows where Genome column is empty/whitespace
+            genome = row.get('Genome', '').strip()
+            if not genome:
+                continue
             genomes[genome].append(row)
     
     return dict(genomes)
+
+
+def check_files_exist(genomes: Dict[str, List[Dict]]) -> bool:
+    """
+    Check if all files specified in the CSV configuration exist.
+    
+    Returns True if all files exist, False otherwise.
+    """
+    print("Checking if all files exist...")
+    all_files_exist = True
+    missing_files = []
+    
+    for genome_name, tracks in genomes.items():
+        print(f"\nChecking files for genome: {genome_name}")
+        
+        for track in tracks:
+            file_path = os.path.join(track['Dirname'], track['Filename'])
+            if os.path.exists(file_path):
+                print(f"  ✓ {track['Label']}: {file_path}")
+            else:
+                print(f"  ✗ {track['Label']}: {file_path} (MISSING)")
+                missing_files.append(file_path)
+                all_files_exist = False
+        
+        # Check for optional rDNA files
+        ref_dirname = None
+        for track in tracks:
+            if track['type'] == 'reference':
+                ref_dirname = track['Dirname']
+                break
+        
+        if ref_dirname:
+            rdna_bed_path = os.path.join(ref_dirname, 'rdna.bed')
+            if os.path.exists(rdna_bed_path):
+                print(f"  ✓ rDNA (optional): {rdna_bed_path}")
+            else:
+                print(f"  - rDNA (optional): {rdna_bed_path} (not found, will skip)")
+    
+    if all_files_exist:
+        print(f"\n✓ All {sum(len(tracks) for tracks in genomes.values())} required files exist!")
+        return True
+    else:
+        print(f"\n✗ {len(missing_files)} file(s) are missing:")
+        for missing_file in missing_files:
+            print(f"  - {missing_file}")
+        return False
 
 
 def create_reference(genome_name: str, ref_record: Dict, output_dir: str) -> str:
@@ -414,6 +463,69 @@ def create_synteny_tracks(genomes: Dict[str, List[Dict]], output_dir: str,
     return synteny_tracks
 
 
+def create_rdna_tracks(genomes: Dict[str, List[Dict]], output_dir: str) -> List[Dict]:
+    """
+    Create rDNA tracks for genomes where rdna.bed files exist in the 'Dirname' directory.
+    
+    Returns list of rDNA track configurations.
+    """
+    rdna_tracks = []
+    
+    for genome_name, tracks in genomes.items():
+        # Get the dirname from the reference track
+        ref_dirname = None
+        for track in tracks:
+            if track['type'] == 'reference':
+                ref_dirname = track['Dirname']
+                break
+        
+        if not ref_dirname:
+            print(f"Warning: No reference track found for genome {genome_name}, skipping rDNA check")
+            continue
+        
+        # Check if rdna.bed exists in the dirname directory
+        rdna_bed_path = os.path.join(ref_dirname, 'rdna.bed')
+        if os.path.exists(rdna_bed_path):
+            print(f"Found rDNA file for {genome_name}: {rdna_bed_path}")
+            
+            # Create rDNA track record
+            rdna_record = {
+                'Dirname': ref_dirname,
+                'Filename': 'rdna.bed',
+                'Format': 'bed',
+                'Label': 'rDNA',
+                'Category': 'assembly',
+                'type': 'FeatureTrack'
+            }
+            
+            try:
+                # Process the rDNA track
+                track_path = sort_and_index_track(rdna_record, genome_name, output_dir)
+                track_config = get_track_config(rdna_record, track_path, genome_name)
+                
+                # Add red color and collapsed display mode
+                track_config['displays'] = [{
+                    'displayId': f"{track_config['trackId']}_d",
+                    'type': 'LinearBasicDisplay',
+                    'renderer': {
+                        'color1': 'red',
+                        'type': 'SvgFeatureRenderer',
+                        'displayMode': 'collapse',
+                        'showLabels': False
+                    }
+                }]
+                
+                rdna_tracks.append(track_config)
+                print(f"Added rDNA track for {genome_name}")
+                
+            except Exception as e:
+                print(f"Error processing rDNA track for {genome_name}: {e}")
+        else:
+            print(f"No rDNA file found for {genome_name} in {ref_dirname}")
+    
+    return rdna_tracks
+
+
 def create_jbrowse_config(genomes: Dict[str, List[Dict]], output_dir: str, 
                          make_paf_script: str) -> None:
     """
@@ -460,6 +572,11 @@ def create_jbrowse_config(genomes: Dict[str, List[Dict]], output_dir: str,
                 print(f"Added track: {track_record['Label']}")
             except Exception as e:
                 print(f"Error processing track {track_record['Label']}: {e}")
+    
+    # Create rDNA tracks
+    print("\nCreating rDNA tracks...")
+    rdna_tracks = create_rdna_tracks(genomes, output_dir)
+    all_tracks.extend(rdna_tracks)
     
     # Create synteny tracks
     print("\nCreating synteny tracks...")
@@ -513,6 +630,11 @@ def main():
         default=None,
         help='Path to make_paf_from_probes.R script (default: look in script directory)'
     )
+    parser.add_argument(
+        '--dry-run',
+        action='store_true',
+        help='Check if all files exist without creating any output (dry run mode)'
+    )
     
     args = parser.parse_args()
     
@@ -538,6 +660,17 @@ def main():
     print(f"Found {len(genomes)} genomes:")
     for genome_name, tracks in genomes.items():
         print(f"  {genome_name}: {len(tracks)} tracks")
+    
+    # If dry run, just check files and exit
+    if args.dry_run:
+        print("\n=== DRY RUN MODE ===")
+        files_exist = check_files_exist(genomes)
+        if files_exist:
+            print("\n✓ Dry run successful - all required files are present")
+            sys.exit(0)
+        else:
+            print("\n✗ Dry run failed - some files are missing")
+            sys.exit(1)
     
     # Create JBrowse2 configuration
     create_jbrowse_config(genomes, args.output_dir, args.make_paf_script)
