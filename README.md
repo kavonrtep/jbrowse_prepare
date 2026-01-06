@@ -18,10 +18,33 @@ first row is header, second row must be reference genome!
 
 ## Install requirements:
 
-     conda install -c conda-forge -c biconda jbrowse \
-     ucsc-fatotwobit gff3sort tabix samtools blast blat \
-     bioconductor-rtracklayer bioconductor-biostrings bioconductor-bsgenome \
-     bzip2
+### Core requirements (all scripts):
+
+     conda install -c conda-forge -c bioconda \
+       jbrowse \
+       samtools \
+       tabix \
+       ucsc-fatotwobit \
+       ucsc-bedgraphtobigwig \
+       gff3sort \
+       blast \
+       blat \
+       bioconductor-rtracklayer \
+       bioconductor-biostrings \
+       bioconductor-bsgenome \
+       bzip2
+
+@cre**Note**: `bgzip` is included with the `tabix` package (htslib).
+
+### Minimal requirements for `create_jbrowse2_config.py`:
+
+     conda install -c conda-forge -c bioconda \
+       jbrowse \
+       samtools \
+       tabix \
+       ucsc-bedgraphtobigwig
+
+**Alternative**: Place the `bedGraphToBigWig` binary in the same directory as the script.
 
 ## Included scripts:
 
@@ -35,6 +58,17 @@ first row is header, second row must be reference genome!
 
 mkdir genome_directory
 cd genome_directory
+export LC_COLLATE=C   # ensure consistent sorting
+mkdir genome_jbrowse2
+cd genome_jbrowse2
 $PATH_TO_JBROWSE_PREPARE/create_jbrowse2_config.py -d . -c $PATH_TO_CONFIG_CSV
+sed -i  's/"global"/"local"/g' config.json   # set different track scaling
+# copy to remote server
+rsync -L -r --update --progress * username@elmo5-26.hw.elixir-czech.cz://mnt/data/jbrowse2/data/jbrowse2/data/your_genome_directory/
+
+# url to access jbrowse2:
+
+https://elmo5-26.hw.elixir-czech.cz/jbrowse2/?config=data%2Fyour_genome_directory%2Fconfig.json
+
 
 ``` 
