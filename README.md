@@ -34,7 +34,7 @@ first row is header, second row must be reference genome!
        bioconductor-bsgenome \
        bzip2
 
-@cre**Note**: `bgzip` is included with the `tabix` package (htslib).
+
 
 ### Minimal requirements for `create_jbrowse2_config.py`:
 
@@ -44,7 +44,7 @@ first row is header, second row must be reference genome!
        tabix \
        ucsc-bedgraphtobigwig
 
-**Alternative**: Place the `bedGraphToBigWig` binary in the same directory as the script.
+
 
 ## Included scripts:
 
