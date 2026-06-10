@@ -84,50 +84,87 @@ def read_config_csv(csv_file: str) -> Dict[str, List[Dict]]:
     return dict(genomes)
 
 
-def check_files_exist(genomes: Dict[str, List[Dict]]) -> bool:
+def precheck_source_files(csv_file: str, genomes: Dict[str, List[Dict]]) -> bool:
     """
-    Check if all files specified in the CSV configuration exist.
-    
-    Returns True if all files exist, False otherwise.
+    Precheck that all source files listed in the CSV exist.
+
+    Iterates through every row of the input CSV and checks whether
+    ``<Dirname>/<Filename>`` exists on disk. Also checks the optional
+    ``rdna.bed`` file in the reference directory of each genome.
+
+    If any files are missing, writes a copy of the input CSV next to the
+    original as ``<stem>_missing.csv`` with an additional ``Missing`` column
+    marking each row (``MISSING`` or empty).
+
+    Returns:
+        True if all source files exist, False otherwise.
     """
-    print("Checking if all files exist...")
-    all_files_exist = True
-    missing_files = []
-    
-    for genome_name, tracks in genomes.items():
-        print(f"\nChecking files for genome: {genome_name}")
-        
-        for track in tracks:
-            file_path = os.path.join(track['Dirname'], track['Filename'])
+    print("Prechecking source files...")
+
+    # Re-read the CSV so we preserve the original row order and all columns
+    with open(csv_file, 'r') as f:
+        reader = csv.DictReader(f, delimiter='\t')
+        fieldnames = list(reader.fieldnames) if reader.fieldnames else []
+        rows = list(reader)
+
+    missing_count = 0
+    checked_rows = []
+
+    for row in rows:
+        new_row = dict(row)
+        dirname = row.get('Dirname', '').strip()
+        filename = row.get('Filename', '').strip()
+        label = row.get('Label', '?')
+
+        if not dirname or not filename:
+            # Blank/invalid row — pass through unchanged
+            new_row['Missing'] = ''
+        else:
+            file_path = os.path.join(dirname, filename)
             if os.path.exists(file_path):
-                print(f"  ✓ {track['Label']}: {file_path}")
+                new_row['Missing'] = ''
+                print(f"  ✓ {label}: {file_path}")
             else:
-                print(f"  ✗ {track['Label']}: {file_path} (MISSING)")
-                missing_files.append(file_path)
-                all_files_exist = False
-        
-        # Check for optional rDNA files
+                new_row['Missing'] = 'MISSING'
+                missing_count += 1
+                print(f"  ✗ {label}: {file_path} (MISSING)")
+
+        checked_rows.append(new_row)
+
+    # Report optional rDNA files (not counted as missing — they are optional)
+    for genome_name, tracks in genomes.items():
         ref_dirname = None
         for track in tracks:
             if track['type'] == 'reference':
                 ref_dirname = track['Dirname']
                 break
-        
         if ref_dirname:
             rdna_bed_path = os.path.join(ref_dirname, 'rdna.bed')
             if os.path.exists(rdna_bed_path):
-                print(f"  ✓ rDNA (optional): {rdna_bed_path}")
+                print(f"  ✓ rDNA (optional) for {genome_name}: {rdna_bed_path}")
             else:
-                print(f"  - rDNA (optional): {rdna_bed_path} (not found, will skip)")
-    
-    if all_files_exist:
-        print(f"\n✓ All {sum(len(tracks) for tracks in genomes.values())} required files exist!")
+                print(f"  - rDNA (optional) for {genome_name}: {rdna_bed_path} (not found, will skip)")
+
+    if missing_count == 0:
+        total = sum(len(tracks) for tracks in genomes.values())
+        print(f"\n✓ Precheck passed: all {total} source files exist.")
         return True
-    else:
-        print(f"\n✗ {len(missing_files)} file(s) are missing:")
-        for missing_file in missing_files:
-            print(f"  - {missing_file}")
-        return False
+
+    # Write _missing.csv report alongside the input file
+    base, ext = os.path.splitext(csv_file)
+    if not ext:
+        ext = '.csv'
+    missing_report = f"{base}_missing{ext}"
+
+    out_fieldnames = fieldnames + ['Missing']
+    with open(missing_report, 'w', newline='') as f:
+        writer = csv.DictWriter(f, fieldnames=out_fieldnames, delimiter='\t')
+        writer.writeheader()
+        writer.writerows(checked_rows)
+
+    print(f"\n✗ Precheck failed: {missing_count} source file(s) missing.")
+    print(f"  Report written to: {missing_report}")
+    return False
 
 
 def create_reference(genome_name: str, ref_record: Dict, output_dir: str) -> str:
@@ -633,7 +670,8 @@ def main():
     parser.add_argument(
         '--dry-run',
         action='store_true',
-        help='Check if all files exist without creating any output (dry run mode)'
+        help='Only run the source-file precheck without creating any output. '
+             'If files are missing, a <config>_missing.csv report is written.'
     )
     
     args = parser.parse_args()
@@ -661,17 +699,21 @@ def main():
     for genome_name, tracks in genomes.items():
         print(f"  {genome_name}: {len(tracks)} tracks")
     
-    # If dry run, just check files and exit
+    # If dry run, just run the precheck and exit
     if args.dry_run:
         print("\n=== DRY RUN MODE ===")
-        files_exist = check_files_exist(genomes)
-        if files_exist:
+        if precheck_source_files(args.config_csv, genomes):
             print("\n✓ Dry run successful - all required files are present")
             sys.exit(0)
         else:
             print("\n✗ Dry run failed - some files are missing")
             sys.exit(1)
-    
+
+    # Precheck source files before any processing; abort early if anything is missing
+    if not precheck_source_files(args.config_csv, genomes):
+        print("\nAborting: please fix the missing files listed in the report and re-run.")
+        sys.exit(1)
+
     # Create JBrowse2 configuration
     create_jbrowse_config(genomes, args.output_dir, args.make_paf_script)
     
